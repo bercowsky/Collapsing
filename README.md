@@ -1,30 +1,34 @@
 # Collapsing
 Framework for unsupervised semantic segmentation using a novel clustering algorithm named Collapsing.
 
+![Segmentation results](results/figures/segmentation_result.png)
+
+
 ## Installation
-To compile the Cython code, run the following command from src/cython:
+
+### Clone the repository
+```shell script
+git clone https://github.com/bercowsky/Collapsing.git
 ```
+
+### Compile Cython code
+```shell script
 cd src/cython
 python3 setup.py build_ext --inplace
 ```
 
 ## Usage
 
-### Clone the repository
-```
-git clone https://github.com/bercowsky/Collapsing.git
-```
-
 ### Run experiments
 To run experiments using STEGO features:
-```
+```shell script
 cd src
 python3 eval_stego.py
 ```
 This script will extract features from a user-defined number of images, then creates meta-points for them, and finally run Collapsing to assign pseudo-labels for each pixel. The script will then evaluate the performance of Collapsing using the pseudo-labels and the ground truth labels, logging the results into W&B.
 
 To run evaluation using DINO, DINOv2 or SAM as a feature extractor:
-```
+```shell script
 cd src
 python3 eval.py
 ```
