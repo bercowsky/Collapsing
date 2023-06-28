@@ -1,1 +1,5 @@
 .DS_Store
+*.so
+build/
+__pycache__/
+wandb/
