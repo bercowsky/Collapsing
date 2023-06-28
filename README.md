@@ -4,16 +4,35 @@ Framework for unsupervised semantic segmentation using a novel clustering algori
 ## Installation
 To compile the Cython code, run the following command from src/cython:
 ```
+cd src/cython
 python3 setup.py build_ext --inplace
 ```
 
 ## Usage
-To run evaluation using STEGO as a feature extractor, run `eval_stego.py`. This script will extract features from a user-defined number of images, then creates meta-points for them, and finally run Collapsing to assign pseudo-labels for each pixel. The script will then evaluate the performance of Collapsing using the pseudo-labels and the ground truth labels, logging the results into W&B.
 
-To run evaluation using DINO, DINOv2 or SAM as a feature extractor, run `eval.py`. As before, this script extracts features from a user-defined number of images using the selected model, then creates meta-points for them, and finally run Collapsing to assign pseudo-labels for each pixel. The script will then evaluate the performance of Collapsing using the pseudo-labels and the ground truth labels, logging the results into W&B.
+### Clone the repository
+```
+git clone https://github.com/bercowsky/Collapsing.git
+```
+
+### Run experiments
+To run experiments using STEGO features:
+```
+cd src
+python3 eval_stego.py
+```
+This script will extract features from a user-defined number of images, then creates meta-points for them, and finally run Collapsing to assign pseudo-labels for each pixel. The script will then evaluate the performance of Collapsing using the pseudo-labels and the ground truth labels, logging the results into W&B.
+
+To run evaluation using DINO, DINOv2 or SAM as a feature extractor:
+```
+cd src
+python3 eval.py
+```
+As before, this script extracts features from a user-defined number of images using the selected model, then creates meta-points for them, and finally run Collapsing to assign pseudo-labels for each pixel. The script will then evaluate the performance of Collapsing using the pseudo-labels and the ground truth labels, logging the results into W&B.
 
 Each script has a number of options to select, including the number of images to use, the distance metric to use (between euclidean and 1-cosine_similarity), the radius of the meta-points and the `k` for the `k`-nearest neighbors algorithm used in Collapsing. Additionally, in `eval.py` the user can select the model to use as a feature extractor, and the option to apply PCA to those features.
 
+### Folder structure
 These scripts expect the following directory structure:
 
 ```
