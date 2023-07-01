@@ -1,0 +1,15 @@
+output_root: '../'
+model_path: "../saved_models/cocostuff27_vit_base_5.ckpt"
+image_dir: "/Users/andresbercowskyrama/Desktop/UNI/TFG/Datasets/pytorch_datasets/gtFine_trainvaltest/gtFine/train"
+experiment_name: "cocostuff_val"
+res: 320
+batch_size: 1
+num_workers: 10
+use_ddp: False
+
+hydra:
+  run:
+    dir: "."
+  output_subdir: ~
+  #job_logging: "disabled"
+  #hydra_logging: "disabled"
