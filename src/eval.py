@@ -51,7 +51,7 @@ from torchvision import transforms as T
 import wandb
 
 import cython.clustering as clustering
-from utils.eval_utils import (
+from utils_collapsing.eval_utils import (
     CustomDataset,
     get_class_labels,
     map_pseudo_to_label,
