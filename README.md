@@ -1,5 +1,5 @@
-# Collapsing
-Framework for unsupervised semantic segmentation using a novel clustering algorithm named Collapsing.
+# FOCL
+Framework for unsupervised semantic segmentation using a novel clustering algorithm named FOCL.
 
 ![Segmentation results](results/figures/segmentation_result.png)
 
@@ -32,9 +32,9 @@ cd src
 python3 eval.py
 ```
 
-These scripts will extract features from a user-defined number of images, then creates meta-points for them, and finally run Collapsing to assign pseudo-labels for each pixel. The script will then evaluate the performance of Collapsing using the pseudo-labels and the ground truth labels, logging the results into W&B.
+These scripts will extract features from a user-defined number of images, then creates meta-points for them, and finally run FOCL to assign pseudo-labels for each pixel. The script will then evaluate the performance of FOCL using the pseudo-labels and the ground truth labels, logging the results into W&B.
 
-Each script has a number of options to select, including the number of images to use, the distance metric to use (between euclidean and 1-cosine_similarity), the radius of the meta-points and the `k` for the `k`-nearest neighbors algorithm used in Collapsing. Additionally, in `eval.py` the user can select the model to use as a feature extractor, and the option to apply PCA to those features.
+Each script has a number of options to select, including the number of images to use, the distance metric to use (between euclidean and 1-cosine_similarity), the radius of the meta-points and the `k` for the `k`-nearest neighbors algorithm used in FOCL. Additionally, in `eval.py` the user can select the model to use as a feature extractor, and the option to apply PCA to those features.
 
 ### Folder structure
 These scripts expect the following directory structure:

@@ -44,11 +44,11 @@ import sys
 import torch
 import torch.nn.functional as F
 import numpy as np
-from sklearn.cluster import KMeans
+from sklearn.cluster import KMeans, MeanShift
 import wandb
 
 import cython.clustering as clustering
-from utils_collapsing.eval_utils import (
+from utils_focl.eval_utils import (
     CustomDataset,
     get_class_labels,
     map_pseudo_to_label,
@@ -131,20 +131,29 @@ def inference(config=None):
 
     centers = np.array([mp.get_center() for mp in meta_points])
 
+    start_time = time.time()
     kmeans = KMeans(n_clusters=min(len(centers), 150), random_state=0).fit(centers)
     labels_kmeans = kmeans.labels_
+    print("Kmeans took {} seconds".format(time.time() - start_time))
+
+    start_time = time.time()
+    mean_shift = MeanShift(bandwidth=config.bandwith).fit(centers)
+    labels_mean_shift = mean_shift.labels_
+    print("Mean shift took {} seconds".format(time.time() - start_time))
+    print("Number of clusters of Mean Shift: {}".format(len(np.unique(labels_mean_shift))))
 
     # Collapse and label meta points
     start_time = time.time()
     collapsed_meta_points = clustering.collapse_meta_points(meta_points, config.k_neighbors)
-    print("Collapsing took {} seconds".format(time.time() - start_time))
+    print("FOCL took {} seconds".format(time.time() - start_time))
     start_time = time.time()
-    labels_meta_points = clustering.get_labels_meta_points(collapsed_meta_points, 0)
+    labels_meta_points = clustering.get_labels_meta_points(collapsed_meta_points)
     print("Labeling took {} seconds".format(time.time() - start_time))
 
     n_clusters = len(np.unique(labels_meta_points))
-    confusion_matrix_collapsing = np.zeros((n_clusters, 151))
+    confusion_matrix_focl = np.zeros((n_clusters, 151))
     confusion_matrix_kmeans = np.zeros((151, 151))
+    confusion_matrix_meanshift = np.zeros((len(np.unique(labels_mean_shift)), 151))
 
     for batch_idx, samples in tqdm(enumerate(dataloader), total=config.num_images):
         if batch_idx == config.num_images:
@@ -152,34 +161,43 @@ def inference(config=None):
         reps = np.asarray(Image.open(os.path.join(METAPOINTS_PATH, samples[2][0].split('.')[0] + '.png')), dtype=np.uint16)
         for i in range(samples[1][0][0].shape[0]):
             for j in range(samples[1][0][0].shape[1]):
-                confusion_matrix_collapsing[labels_meta_points[reps[i*448+j]].flatten(), samples[1][0][0][i,j]] += 1
+                confusion_matrix_focl[labels_meta_points[reps[i*448+j]].flatten(), samples[1][0][0][i,j]] += 1
                 confusion_matrix_kmeans[labels_kmeans[reps[i*448+j]].flatten(), samples[1][0][0][i,j]] += 1
+                confusion_matrix_meanshift[labels_mean_shift[reps[i*448+j]].flatten(), samples[1][0][0][i,j]] += 1
 
     # Compute evaluation metrics
-    measurements_collapsing = measure_from_confusion_matrix(confusion_matrix_collapsing)
+    measurements_focl = measure_from_confusion_matrix(confusion_matrix_focl)
     measurements_kmeans = measure_from_confusion_matrix(confusion_matrix_kmeans)
+    measurements_meanshift = measure_from_confusion_matrix(confusion_matrix_meanshift)
 
     # Log results to wandb
     wandb.log({
-        'assigned_iou_collapsing': measurements_collapsing['assigned_iou'],
-        'assigned_miou_collapsing': measurements_collapsing['assigned_miou'],
-        'homogeneity_collapsing': measurements_collapsing['homogeneity'],
-        'completeness_collapsing': measurements_collapsing['completeness'],
-        'v_score_collapsing': measurements_collapsing['v_score'],
+        'assigned_iou_focl': measurements_focl['assigned_iou'],
+        'assigned_miou_focl': measurements_focl['assigned_miou'],
+        'homogeneity_focl': measurements_focl['homogeneity'],
+        'completeness_focl': measurements_focl['completeness'],
+        'v_score_focl': measurements_focl['v_score'],
         'assigned_iou_kmeans': measurements_kmeans['assigned_iou'],
         'assigned_miou_kmeans': measurements_kmeans['assigned_miou'],
         'homogeneity_kmeans': measurements_kmeans['homogeneity'],
         'completeness_kmeans': measurements_kmeans['completeness'],
         'v_score_kmeans': measurements_kmeans['v_score'],
+        'assigned_iou_meanshift': measurements_meanshift['assigned_iou'],
+        'assigned_miou_meanshift': measurements_meanshift['assigned_miou'],
+        'homogeneity_meanshift': measurements_meanshift['homogeneity'],
+        'completeness_meanshift': measurements_meanshift['completeness'],
+        'v_score_meanshift': measurements_meanshift['v_score'],
         'num_clusters': n_clusters,
+        'num_clusters_meanshift': len(mean_shift.cluster_centers_),
         'num_meta_points': len(meta_points),
     })
 
 
     # Map label id to class name
     class_labels = get_class_labels(os.path.join(DATASET_DIR, "objectInfo150.txt"))
-    map_to_label_collapsing = map_pseudo_to_label(measurements_collapsing['assignment'])
+    map_to_label_focl = map_pseudo_to_label(measurements_focl['assignment'])
     map_to_label_kmeans = map_pseudo_to_label(measurements_kmeans['assignment'])
+    map_to_label_meanshift = map_pseudo_to_label(measurements_meanshift['assignment'])
     mask_list = []
 
     # Send images to WandB
@@ -188,34 +206,39 @@ def inference(config=None):
             break
         # Load image and segmentation
         image = samples[0][0].squeeze().numpy().transpose((1, 2, 0))
-        reps_collapsing = np.asarray(Image.open(os.path.join(METAPOINTS_PATH, samples[2][0].split('.')[0] + '.png')), dtype=np.uint16)
-        segmentation_collapsing = np.array([labels_meta_points[reps_collapsing[i]] for i in range(len(reps_collapsing))]).flatten()
-        for i, pseudo in enumerate(segmentation_collapsing.flatten()):
-            segmentation_collapsing[i] = map_to_label_collapsing[pseudo] if pseudo in map_to_label_collapsing else 0
-        segmentation_collapsing = segmentation_collapsing.reshape((448, 448))
+        reps_focl = np.asarray(Image.open(os.path.join(METAPOINTS_PATH, samples[2][0].split('.')[0] + '.png')), dtype=np.uint16)
+        segmentation_focl = np.array([labels_meta_points[reps_focl[i]] for i in range(len(reps_focl))]).flatten()
+        for i, pseudo in enumerate(segmentation_focl.flatten()):
+            segmentation_focl[i] = map_to_label_focl[pseudo] if pseudo in map_to_label_focl else 0
+        segmentation_focl = segmentation_focl.reshape((448, 448))
 
-        segmentation_kmeans = np.array([labels_kmeans[reps_collapsing[i]] for i in range(len(reps_collapsing))]).flatten()
+        segmentation_kmeans = np.array([labels_kmeans[reps_focl[i]] for i in range(len(reps_focl))]).flatten()
         for i, pseudo in enumerate(segmentation_kmeans.flatten()):
             segmentation_kmeans[i] = map_to_label_kmeans[pseudo] if pseudo in map_to_label_kmeans else 0
         segmentation_kmeans = segmentation_kmeans.reshape((448, 448))
+
+        segmentation_meanshift = np.array([labels_mean_shift[reps_focl[i]] for i in range(len(reps_focl))]).flatten()
+        for i, pseudo in enumerate(segmentation_meanshift.flatten()):
+            segmentation_meanshift[i] = map_to_label_meanshift[pseudo] if pseudo in map_to_label_meanshift else 0
+        segmentation_meanshift = segmentation_meanshift.reshape((448, 448))
 
         true_segmentation = samples[1][0].squeeze().numpy()
 
         mask_list.append(wandb.Image(image, masks={
             "predictions": {
-                "mask_data": segmentation_collapsing,
+                "mask_data": segmentation_focl,
                 "class_labels": class_labels
             },
             "ground_truth": {
                 "mask_data": true_segmentation,
                 "class_labels": class_labels
             },
-            # "crf": {
-            #     "mask_data": crf_segmentation,
-            #     "class_labels": class_labels,
-            # },
             "kmeans": {
                 "mask_data": segmentation_kmeans,
+                "class_labels": class_labels,
+            },
+            "mean_shift": {
+                "mask_data": segmentation_meanshift,
                 "class_labels": class_labels,
             }
         }))
@@ -230,8 +253,8 @@ if __name__ == "__main__":
     while metric not in ["cosine", "euclidean"]:
         metric = input("Please enter a valid distance metric: ")
     
-    radius = float(input("Set the radius for the collapsing algorithm: "))
-    k_neighbors = int(input("Set the number of neighbors for the collapsing algorithm: "))
+    radius = float(input("Set the radius for the FOCL algorithm: "))
+    k_neighbors = int(input("Set the number of neighbors for the FOCL algorithm: "))
 
     # Create the dataset
     dataset = CustomDataset(DATASET_DIR)
@@ -242,12 +265,13 @@ if __name__ == "__main__":
         num_iters = int(input(f"Please enter a number less than {len(dataset)}: "))
 
     # WandB config
-    wandb.init(project="collapsing-ade20k")
+    wandb.init(project="focl-ade20k")
     wandb.config.update({
         'radius': radius,
         'k_neighbors': k_neighbors,
         'metric': metric,
         'num_images': num_iters,
+        'bandwith': 0.53,
     })
 
     
