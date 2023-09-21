@@ -145,7 +145,6 @@ def collapse_meta_points(np.ndarray[object, ndim=1] meta_points, int k, str metr
     return meta_points
 
 
-# Function to label points that are inside the radius
 cpdef np.ndarray[DTYPE_t, ndim=1] get_labels_meta_points(
     np.ndarray[object, ndim=1] meta_points,
     np.float32_t th,
@@ -166,5 +165,30 @@ cpdef np.ndarray[DTYPE_t, ndim=1] get_labels_meta_points(
                     labels[j] = label_count
 
             label_count += 1
+
+    return labels
+
+
+# Function to label points that are inside the radius
+cpdef np.ndarray[DTYPE_t, ndim=1] get_labels_meta_points2(
+    np.ndarray[object, ndim=1] meta_points,
+):
+    cdef np.ndarray[DTYPE_t, ndim=1] labels = np.zeros(meta_points.shape[0], dtype=np.uint64)
+
+    cdef dict labels_set = dict()
+    cdef DTYPE_t label_count = 0
+
+    cdef tuple center
+
+    for i in range(meta_points.shape[0]):
+        mp = meta_points[i]
+        center = tuple(mp.get_center())
+
+        if center not in labels_set:
+            labels_set[center] = label_count
+            labels[i] = label_count
+            label_count += 1
+        else:
+            labels[i] = labels_set[center]
 
     return labels

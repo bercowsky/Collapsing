@@ -1,6 +1,6 @@
 from matplotlib import pyplot as plt
 from STEGO.src.utils import UnsupervisedMetrics, add_plot, get_transform, load_model, one_hot_feats, prep_args, prep_for_plot, remove_axes, resize
-from utils import *
+# from utils import *
 from modules import *
 from data import *
 from torch.utils.data import DataLoader

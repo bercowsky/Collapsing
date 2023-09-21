@@ -43,7 +43,7 @@ from tqdm import tqdm
 import numpy as np
 from PIL import Image
 from segment_anything import sam_model_registry
-from sklearn.cluster import KMeans
+from sklearn.cluster import KMeans, MeanShift
 from sklearn.decomposition import PCA
 import torch
 import torch.nn.functional as F
@@ -99,7 +99,7 @@ def process_batch(img, model, meta_points, config):
             code2 = model.image_encoder(img.flip(dims=[3]))
     elif config.model.startswith('DINO'):
         with torch.no_grad():
-            img = T.Resize((1024, 1024), antialias=True)(img)
+            img = T.Resize((896, 896), antialias=True)(img)
             code1 = torch.tensor(get_dino_embeddings(DEVICE, model, img))
             code2 = torch.tensor(get_dino_embeddings(DEVICE, model, img.flip(dims=[3])))
 
@@ -144,20 +144,29 @@ def inference(model, dataloader, config=None):
 
     centers = np.array([mp.get_center() for mp in meta_points])
 
+    start_time = time.time()
     kmeans = KMeans(n_clusters=min(len(centers), NUM_GT_CLASSES), n_init='auto', random_state=0).fit(centers)
     labels_kmeans = kmeans.labels_
+    print("Kmeans took {} seconds".format(time.time() - start_time))
+
+    start_time = time.time()
+    mean_shift = MeanShift(bandwidth=config.bandwith).fit(centers)
+    labels_mean_shift = mean_shift.labels_
+    print("Mean shift took {} seconds".format(time.time() - start_time))
+    print("Number of clusters of Mean Shift: {}".format(len(np.unique(labels_mean_shift))))
 
     # Collapse and label meta points
     start_time = time.time()
     collapsed_meta_points = clustering.collapse_meta_points(meta_points, config.k_neighbors, config.metric)
     print("Collapsing took {} seconds".format(time.time() - start_time))
     start_time = time.time()
-    labels_meta_points = clustering.get_labels_meta_points(collapsed_meta_points, 0, config.metric)
+    labels_meta_points = clustering.get_labels_meta_points2(collapsed_meta_points)
     print("Labeling took {} seconds".format(time.time() - start_time))
 
     n_clusters = len(np.unique(labels_meta_points))
     confusion_matrix_collapsing = np.zeros((n_clusters, NUM_GT_CLASSES+1))
     confusion_matrix_kmeans = np.zeros((NUM_GT_CLASSES+1, NUM_GT_CLASSES+1))
+    confusion_matrix_meanshift = np.zeros((len(np.unique(labels_mean_shift)), NUM_GT_CLASSES+1))
     for batch_idx, samples in tqdm(enumerate(dataloader), total=config.num_images):
         if batch_idx == config.num_images:
             break
@@ -166,6 +175,7 @@ def inference(model, dataloader, config=None):
             for j in range(samples[1][0][0].shape[1]):
                 confusion_matrix_collapsing[labels_meta_points[reps[i*448+j]].flatten(), samples[1][0][0][i,j]] += 1
                 confusion_matrix_kmeans[labels_kmeans[reps[i*448+j]].flatten(), samples[1][0][0][i,j]] += 1
+                confusion_matrix_meanshift[labels_mean_shift[reps[i*448+j]].flatten(), samples[1][0][0][i,j]] += 1
 
     start_time = time.time()
     measurements_collapsing = measure_from_confusion_matrix(confusion_matrix_collapsing)
@@ -173,6 +183,7 @@ def inference(model, dataloader, config=None):
     start_time = time.time()
     measurements_kmeans = measure_from_confusion_matrix(confusion_matrix_kmeans)
     print("Measuring kmeans took {} seconds".format(time.time() - start_time))
+    measurements_meanshift = measure_from_confusion_matrix(confusion_matrix_meanshift)
 
     wandb.log({
         'assigned_iou_collapsing': measurements_collapsing['assigned_iou'],
@@ -185,7 +196,13 @@ def inference(model, dataloader, config=None):
         'homogeneity_kmeans': measurements_kmeans['homogeneity'],
         'completeness_kmeans': measurements_kmeans['completeness'],
         'v_score_kmeans': measurements_kmeans['v_score'],
+        'assigned_iou_meanshift': measurements_meanshift['assigned_iou'],
+        'assigned_miou_meanshift': measurements_meanshift['assigned_miou'],
+        'homogeneity_meanshift': measurements_meanshift['homogeneity'],
+        'completeness_meanshift': measurements_meanshift['completeness'],
+        'v_score_meanshift': measurements_meanshift['v_score'],
         'num_clusters': n_clusters,
+        'num_clusters_meanshift': len(mean_shift.cluster_centers_),
         'num_meta_points': len(meta_points),
     })
 
@@ -194,6 +211,7 @@ def inference(model, dataloader, config=None):
     class_labels = get_class_labels(os.path.join(DATASET_DIR, "objectInfo150.txt"))
     map_to_label_collapsing = map_pseudo_to_label(measurements_collapsing['assignment'])
     map_to_label_kmeans = map_pseudo_to_label(measurements_kmeans['assignment'])
+    map_to_label_meanshift = map_pseudo_to_label(measurements_meanshift['assignment'])
     mask_list = []
     # Send images to WandB
     for batch_idx, samples in enumerate(dataloader):
@@ -215,6 +233,11 @@ def inference(model, dataloader, config=None):
             segmentation_kmeans[i] = map_to_label_kmeans[pseudo] if pseudo in map_to_label_kmeans else 0
         segmentation_kmeans = segmentation_kmeans.reshape((448, 448))
 
+        segmentation_meanshift = np.array([labels_mean_shift[reps_collapsing[i]] for i in range(len(reps_collapsing))]).flatten()
+        for i, pseudo in enumerate(segmentation_meanshift.flatten()):
+            segmentation_meanshift[i] = map_to_label_meanshift[pseudo] if pseudo in map_to_label_meanshift else 0
+        segmentation_meanshift = segmentation_meanshift.reshape((448, 448))
+
         # Get true segmentation
         true_segmentation = samples[1][0].squeeze().numpy()
 
@@ -229,6 +252,10 @@ def inference(model, dataloader, config=None):
             },
             "kmeans": {
                 "mask_data": segmentation_kmeans,
+                "class_labels": class_labels,
+            },
+            "mean_shift": {
+                "mask_data": segmentation_meanshift,
                 "class_labels": class_labels,
             }
         }))
@@ -277,7 +304,7 @@ if __name__ == "__main__":
     num_iters = int(input(f"Select the number of images to process (max {len(dataset)}): "))
     use_pca = int(input("Do you want to apply PCA? (0 or 1): "))
     while use_pca not in [0, 1]:
-        use_pca = int(input("Please enter a valid value (0 ir 1): "))
+        use_pca = int(input("Please enter a valid value (0 or 1): "))
 
     use_pca = bool(use_pca)
 
@@ -289,7 +316,8 @@ if __name__ == "__main__":
         'metric': metric,
         'model': model_name,
         'num_images': num_iters,
-        'use_pca': use_pca
+        'use_pca': use_pca,
+        'bandwith': 0.75,
     })
 
     # Run inference
